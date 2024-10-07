@@ -1,48 +1,78 @@
 package com.example.lab08
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-
+import java.util.Date
 
 class TaskViewModel(private val dao: TaskDao) : ViewModel() {
-
-    // Estado para la lista de tareas
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
-    val tasks: StateFlow<List<Task>> = _tasks
+    val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
+
+    private val _notificationEvents = MutableSharedFlow<Task>()
+    val notificationEvents: SharedFlow<Task> = _notificationEvents.asSharedFlow()
 
     init {
-        // Al inicializar, cargamos las tareas de la base de datos
+        loadTasks()
+        observeNotificationEvents() // Suscribirse a eventos de notificación
+    }
+
+    private fun loadTasks() {
         viewModelScope.launch {
-            _tasks.value = dao.getAllTasks()
+            dao.getAllTasksFlow().collect { taskList ->
+                _tasks.value = taskList
+            }
         }
     }
 
-    // Función para añadir una nueva tarea
-    fun addTask(description: String) {
-        val newTask = Task(description = description)
-        viewModelScope.launch {
-            dao.insertTask(newTask)
-            _tasks.value = dao.getAllTasks() // Recargamos la lista
+    fun addTask(title: String, priority: Priority = Priority.MEDIUM, category: String = Task.DEFAULT_CATEGORY) {
+        if (title.isNotBlank()) { // Asegúrate de que el título no esté vacío
+            viewModelScope.launch {
+                val newTask = Task(
+                    title = title,
+                    priority = priority,
+                    category = category,
+                    createdAt = Date()
+                )
+                dao.insertTask(newTask)
+                _notificationEvents.emit(newTask) // Emitir el evento de notificación
+            }
         }
     }
 
-    // Función para alternar el estado de completado de una tarea
-    fun toggleTaskCompletion(task: Task) {
+    fun deleteTask(task: Task) {
         viewModelScope.launch {
-            val updatedTask = task.copy(isCompleted = !task.isCompleted)
-            dao.updateTask(updatedTask)
-            _tasks.value = dao.getAllTasks() // Recargamos la lista
+            dao.deleteTask(task)
         }
     }
 
-    // Función para eliminar todas las tareas
+    fun updateTask(task: Task) {
+        viewModelScope.launch {
+            dao.updateTask(task)
+            // Emitir el evento de notificación solo si la tarea no está completada
+            if (!task.isCompleted) {
+                Log.d("TaskViewModel", "Notificación enviada para: ${task.title}")
+                _notificationEvents.emit(task)
+            }
+        }
+    }
+
     fun deleteAllTasks() {
         viewModelScope.launch {
             dao.deleteAllTasks()
             _tasks.value = emptyList() // Vaciamos la lista en el estado
+        }
+    }
+
+    // Función para observar eventos de notificación
+    private fun observeNotificationEvents() {
+        viewModelScope.launch {
+            notificationEvents.collect { task ->
+                // Aquí puedes manejar la lógica de notificación
+                // Esto podría ser un evento que llame a sendNotification en MainActivity
+            }
         }
     }
 }
